@@ -92,7 +92,7 @@
 
 **Phase 2: Hardware & Lab Setup** (4–8 weeks)  
 - Procure storage arrays and compute nodes  
-- Establish direct Spark-to-frame connections  
+- Establish direct connections  
 - Initial performance and failover testing
 
 **Phase 3: Full Production Deployment** (4–8 weeks)  

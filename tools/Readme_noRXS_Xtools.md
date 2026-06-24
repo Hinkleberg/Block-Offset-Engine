@@ -2,7 +2,7 @@
 
 ### A spatial compute primitive built on the physics of storage.
 
-I came up with the hairbrained idea that if zelda could move logically through storage, why cant I? I brainedstormed for 3 years, trying to figure out a way to represent storage in that manner. I beat my head against the wall, because there were always a bottleneck somewhere. This Engine fixes that reality, at least in my theory. This is all theory and nothing is concrete. This was purely an idea I had. Living on a prayer. But, I've built an engine that is capable of 100us response. I'm not going to say how I did this, because I want to work on the project and help scale it myself. This is my resume in how I have learned to dictate with 0 knowledge of how to code, just how to read/interpret it. This spatial engine has MASSIVE implications on the entire tech industry. At scale with a simple 10TB SAN with 1 single engine, I have effectively removed all overhead tooling required to run a SAN Engine, with custom architecture. I have removed the entire ecosystem. 
+I came up with the hairbrained idea that if zelda could move logically through storage, why cant I? I brainedstormed for 3 years, trying to figure out a way to represent storage in that manner. I beat my head against the wall, because there were always a bottleneck somewhere. This Engine fixes that reality, at least in my theory. This is all theory and nothing is concrete. This was purely an idea I had. Living on a prayer. 
 
 Most systems that need to represent space — game worlds, city digital twins, military simulations, scientific grids, disaster models — solve the same problem the same way. They build a database. They add a streaming layer. They add a cache. They add a network protocol. Then they hope the stack is fast enough and pray it doesn't desync under load.
 
@@ -52,12 +52,12 @@ This is, to the best of current knowledge, the largest single-image offset-addre
 │                       ResilientStore                             │
 │   Write: Journal → SparseBlockStore → ReplicationManager        │
 │   Read:  Local → Verify → Recover from Replica                  │
-│   State: Persisted block_state_index (SQLite)                   │
+│   State: Persisted block_state_index (binary flat image)         │
 └──────────────┬──────────────────────┬──────────────────────────┘
                │                      │
   ┌────────────▼──────┐   ┌───────────▼──────────────────┐
   │  SparseBlockStore │   │      ReplicationManager       │
-  │  SQLite + zlib    │   │      Fan-out to N nodes       │
+  │  Binary + zlib    │   │      Fan-out to N nodes       │
   │  SHA256 checksums │   │      Quorum enforcement       │
   │  LRU eviction     │   │      Persistent entry log     │
   │  Capacity bounds  │   │      Auto-unhealthy nodes     │
@@ -95,6 +95,8 @@ This is, to the best of current knowledge, the largest single-image offset-addre
 
 **Hardware-agnostic core.** The same engine runs identically over RAM, NVMe, or cloud block storage (EBS, GCS, Azure Disk). The coordinate-to-offset formula is the same regardless of what sits underneath. Plug in the hardware; the world doesn't change.
 
+**External tools are optional integrations, not dependencies.** SQL databases, game engines (Unreal, Unity, Godot, O3DE), physics engines, autonomous vehicle simulation stacks, and military simulation frameworks are not part of this engine. They can always be hooked in at a later date via adapter modules that translate between the engine's binary block API and whatever interface the external tool expects. The engine itself remains agnostic — it knows nothing about the tool on the other end of the adapter, and the tool need know nothing about the engine's internals. This is the correct separation. The adapters live at the boundary; the engine lives at the core.
+
 **Extreme efficiency at scale.** Massive persistent worlds with a low hardware footprint. No streaming middleware means no cache warm-up latency, no chunk boundary stalls, no object graph deserialization. Reading the block at `(10, 64, 10)` is `(10 × W × H + 64 × W + 10) × 16`. That's it.
 
 **Crash safety by design, not by policy.** Every write is journaled before it touches the block store. Every read verifies a SHA-256 checksum. Every replication enforces quorum. The engine cannot silently corrupt — it either succeeds verifiably or raises an error.
@@ -113,7 +115,7 @@ Array B (RenderStore) is the read array. It receives only post-commit, post-quor
 
 This separation means a burst of world mutations — a world generator running flat out, an AI tick updating thousands of blocks, a disaster propagation event rewriting a region — never introduces a single frame of latency into what clients see. Writes and reads are physically decoupled at the storage layer, not just at the software layer.
 
-The intended production configuration is two separate NVMe devices: `world.db` on one, `world_render.db` on another. The `mirror_write_seq` property tracks how far Array B lags Array A in real time. The MirrorHealthMonitor raises status before the render feed ever notices a problem.
+The intended production configuration is two separate NVMe devices — ideally direct-attached to the datacenter rack — with `world.img` on one and `world_render.img` on the other. No table, no query, no intermediary: direct addressing, direct I/O. The `mirror_write_seq` property tracks how far Array B lags Array A in real time. The MirrorHealthMonitor raises status before the render feed ever notices a problem.
 
 ---
 
@@ -157,6 +159,100 @@ Large-scale VFX environments — a photoreal battlefield, a fantasy continent, a
 
 ---
 
+## Industry Adapters
+
+Each industry that operates on this engine brings its own toolchain, its own wire protocols, and its own simulation algorithms. The engine does not absorb those concerns — it exposes a clean binary block API and lets adapters translate between that API and whatever the industry tool expects. Adapters are thin translation layers, not rewrites. The engine stays fast and agnostic; the adapter handles the impedance mismatch.
+
+All adapters follow the same pattern: implement `read_block(offset) → bytes`, `write_block(offset, data)`, and `entity_update(record)` against the engine's binary API, then speak the industry tool's native protocol on the other side. The engine never knows which adapter is attached. The adapter never needs to understand the engine's internals beyond those three calls.
+
+> **Note:** The adapters listed here (and in the repo) are the correct place to wire in external tools. SQL layers, cloud asset stores, analytics pipelines, and any other system can be added at any time through this mechanism without modifying the engine itself.
+
+---
+
+### military_adapter.py
+
+**Defense & Military Simulation Adapter**
+
+Military simulation tools — VBS4, OneSAF, JSAF, JCATS, and their derivatives — communicate over DIS (Distributed Interactive Simulation, IEEE 1278) and HLA (High Level Architecture, IEEE 1516). These protocols model the battlespace as a collection of entities with PDU (Protocol Data Unit) state packets, not as a flat spatial image. This adapter bridges between the engine's binary block and entity-sidecar API and the DIS/HLA entity-state model.
+
+**Translation responsibilities:**
+
+- **Coordinate system:** Military simulations typically use ECEF (Earth-Centered Earth-Fixed) geodetic coordinates (lat/lon/alt) or UTM. The adapter converts between geodetic and the engine's flat-offset space using a configurable origin anchor and scale factor.
+- **Entity PDU → EntityRecord:** Incoming DIS Entity State PDUs are decoded and mapped to the engine's 64-byte `EntityRecord` format. The PDU's `EntityIdentifier` becomes `entity_id`, dead-reckoning state is resolved to a concrete position and written as `(x, y, z, vx, vy, vz)`, and the PDU's `EntityType` enum maps to the engine's `EntityType`.
+- **EntityRecord → PDU:** Outgoing entity delta packets from `tick_delta()` are serialised back to DIS Entity State PDUs for broadcast to external simulation participants.
+- **Terrain mutation:** Terrain-modification events (crater creation, defilade, obstacle placement) are translated from their DIS/HLA mutation representation to `write_block(offset, data)` calls through the ResilientStore write path, ensuring full journaling and quorum enforcement.
+- **Battlespace picture isolation:** Array A is the authoritative battlespace state; Array B is the common operating picture distributed to commander terminals. The adapter exposes Array B's render feed as a DIS/HLA multicast stream.
+
+```python
+from military_adapter import MilitarySimAdapter, CoordOrigin
+
+adapter = MilitarySimAdapter(
+    resilient_store=rs,
+    entity_sidecar=sidecar,
+    render_feed=feed,
+    origin=CoordOrigin(lat=38.8977, lon=-77.0365, alt=0.0),  # anchor point
+    scale_m_per_block=0.66,          # 66 cm ground resolution
+    dis_port=3000,
+    hla_federation="BattlespaceEngine",
+)
+adapter.start()
+# Incoming DIS PDUs → engine writes; outgoing render deltas → DIS multicast
+```
+
+**Pluggable algorithms:** The adapter exposes hooks for unit-specific algorithms the military simulation tool provides — line-of-sight, radar cross-section, threat assessment. These are callbacks: `los_callback(from_offset, to_offset) → bool`, `threat_callback(entity_record) → float`. The engine calls none of them directly; the adapter wires them in.
+
+---
+
+### autonomous_adapter.py
+
+**Autonomous Vehicle & Robotics Simulation Adapter**
+
+AV simulation tools — CARLA, LGSVL, AWSIM, Waymo's internal stack, and ROS 2-based frameworks — model the world as a combination of HD map lanes, semantic occupancy grids, and dynamic actor state. Their primary bottleneck is world streaming: pulling terrain and dynamic object state from databases fast enough to feed thousands of parallel simulation instances simultaneously. This adapter exposes the engine's binary block and entity-sidecar API as the world data source for AV simulation, replacing the database streaming layer with direct offset arithmetic.
+
+**Translation responsibilities:**
+
+- **Coordinate system:** AV tools typically work in local ENU (East-North-Up) coordinates anchored to a map origin, or in Lanelet2 lane-graph coordinates. The adapter converts ENU ↔ engine offset using a configurable map origin and resolution.
+- **Occupancy grid mapping:** The engine's 3D block grid maps directly onto a voxel occupancy grid. `block_type` and `flags.solid` are translated to occupancy values. The adapter materialises occupancy subgrids on demand for the AV stack's sensor simulation modules.
+- **ROS 2 / Cyber RT integration:** Entity records from `tick_delta()` are published as `nav_msgs/Odometry`, `derived_object_msgs/ObjectArray`, or `autoware_auto_perception_msgs/TrackedObjects` topics depending on the target framework. Incoming actor updates from the AV simulation are translated back to `EntityRecord` writes.
+- **HD map layer:** Static road geometry (lane boundaries, traffic signs, crosswalks) is stored as a specialised block type layer. The adapter reads these blocks and re-emits them as Lanelet2-format map tiles or OpenDRIVE segments for consumption by the AV planner.
+- **Sensor simulation feeds:** LIDAR, RADAR, and camera frustum queries are translated to `blocks_in_range()` + entity sidecar lookups. The adapter packages the results in the sensor data format the AV simulation expects (e.g. ROS `sensor_msgs/PointCloud2` for LIDAR).
+
+```python
+from autonomous_adapter import AVSimAdapter, MapOrigin, AVFramework
+
+adapter = AVSimAdapter(
+    resilient_store=rs,
+    entity_sidecar=sidecar,
+    render_feed=feed,
+    origin=MapOrigin(east=0.0, north=0.0, up=0.0),
+    scale_m_per_block=0.66,
+    framework=AVFramework.ROS2,      # or CARLA, LGSVL, AWSIM, AUTOWARE
+    ros_namespace="/world_engine",
+)
+adapter.start()
+# Block reads → occupancy grid; entity deltas → ROS topics; AV actor state → entity writes
+```
+
+**Pluggable algorithms:** AV stacks bring their own path planning, sensor fusion, and prediction algorithms. The adapter exposes callbacks: `obstacle_callback(offsets) → list[EntityRecord]`, `map_query_callback(lane_id) → list[offset]`. The engine never touches these; the adapter wires them into the appropriate block or entity reads.
+
+---
+
+### Additional Adapters (Reference Implementations)
+
+The repo includes reference adapter implementations for other industries. All follow the same pattern — binary block API inward, industry protocol outward:
+
+| Adapter | Tool(s) | Protocol / Format |
+|---------|---------|-------------------|
+| `godot_adapter.py` | Godot 4.x | GDExtension / WebSocket block stream |
+| `unity_adapter.py` | Unity | C# native plugin / UDP block stream |
+| `unreal_adapter.py` | Unreal Engine 5 | Unreal plugin / shared memory block bridge |
+| `o3de_adapter.py` | O3DE | Gem / EBus block event bridge |
+| `sql_store_adapter.py` | Any SQL consumer | Read-only SQL view over block data (analytics, asset pipelines) |
+
+> **These tools are not part of the engine.** They are optional integrations. The engine works identically whether zero adapters or ten are attached. Adapters are the correct place for industry-specific logic, protocol translation, and algorithmic hooks — not the engine core.
+
+---
+
 ## Modules
 
 ### block_layout.py
@@ -180,20 +276,20 @@ print(layout)  # WorldLayout(64×64×64 blocks, image=4.0 MB)
 
 ### sparse_block_store.py
 
-SQLite-backed sparse block store. Every block is zlib-compressed and SHA-256-checksummed on write; the digest is verified on every read. Silent corruption is structurally impossible.
+Binary flat-image sparse block store. The engine operates directly on binary block I/O — no database layer sits between a coordinate and its bytes. Every block is zlib-compressed and SHA-256-checksummed on write; the digest is verified on every read. Silent corruption is structurally impossible.
 
 - `ChecksumMismatchError` raised on corrupt reads — the engine never silently returns bad data.
-- `verify_integrity()` — paginated generator scan using a dedicated read-only connection; never blocks live I/O. Drive it from a background thread or maintenance loop.
+- `verify_integrity()` — paginated generator scan over the flat image using a dedicated read-only file handle; never blocks live I/O. Drive it from a background thread or maintenance loop.
 - `get_block_metadata()` — returns checksum, compression flag, timestamp, and write sequence number without loading the payload.
 - World geometry enforcement — `max_blocks` and `block_size` cap the address space to match the flat image dimensions. `CapacityError` raised on overflow.
 - LRU eviction — least-recently-read block evicted when the store is at capacity (`evict_on_full=True`).
-- Monotonic `write_seq` column persisted per block; restored from DB on startup for stale-read detection.
-- Two SQLite connections: a write connection for all mutations and a read-only connection for integrity scans.
+- Monotonic `write_seq` field persisted per block record; restored from the image on startup for stale-read detection.
+- Separate write and read-only file handles: the write handle owns all mutations; the read-only handle serves integrity scans concurrently without locking.
 
 ```python
 from sparse_block_store import SparseBlockStore, ChecksumMismatchError, CapacityError
 
-store = SparseBlockStore("world.db", max_blocks=65536, block_size=4096)
+store = SparseBlockStore("world.img", max_blocks=65536, block_size=4096)
 checksum = store.write_block(0, data)
 raw = store.read_block(0)                   # verifies checksum automatically
 
@@ -204,12 +300,12 @@ for result in store.verify_integrity():     # non-blocking generator
 
 ### replication_manager.py
 
-Multi-node block replication with quorum enforcement and a persistent entry log.
+Multi-node block replication with quorum enforcement and a persistent binary entry log.
 
 - `register_node` / `deregister_node` — dynamic node registry with per-node metadata.
 - `replicate_block()` — fans the block out to all healthy nodes via a pluggable `sync_callback`; raises `QuorumError` if `successful_nodes < required_replicas`.
 - Quorum is hard-enforced — writes below threshold are never silently accepted.
-- Persistent replication log — `replication_log` SQLite table records which nodes hold which blocks; survives restarts so `nodes_with_block()` is always accurate.
+- Persistent replication log — a binary append-only log records which nodes hold which blocks by offset; survives restarts so `nodes_with_block()` is always accurate. No SQL engine is involved in the replication path — the log is a flat binary structure with a fixed record size, written and read with direct byte addressing. This keeps the replication path consistent with the storage model: offset in, offset out.
 - Auto-unhealthy — a node is automatically marked unhealthy after `failure_threshold` consecutive failures (default 3); no external health-checker required.
 - `mark_healthy()` / `mark_unhealthy()` — manual override for external health monitors.
 - `statistics()` and `health_report()` — per-node and aggregate monitoring snapshots.
@@ -221,7 +317,7 @@ def my_sync(node_id, offset, data):
     remote_nodes[node_id].put_block(offset, data)
 
 rm = ReplicationManager(sync_callback=my_sync, required_replicas=2,
-                        log_path="repl_log.db")
+                        log_path="repl_log.bin")
 rm.register_node("node-a", {"host": "10.0.0.1", "port": 7001})
 rm.register_node("node-b", {"host": "10.0.0.2", "port": 7001})
 rm.register_node("node-c", {"host": "10.0.0.3", "port": 7001})
@@ -261,14 +357,14 @@ from resilient_store import ResilientStore, BlockState, CorruptBlockError
 from sparse_block_store import SparseBlockStore
 from replication_manager import ReplicationManager, QuorumError
 
-local = SparseBlockStore("world.db", max_blocks=65536)
+local = SparseBlockStore("world.img", max_blocks=65536)
 rm    = ReplicationManager(sync_callback=my_sync, required_replicas=2,
-                           log_path="repl_log.db")
+                           log_path="repl_log.bin")
 
 rs = ResilientStore(
     local_store=local,
     replication_manager=rm,
-    state_db_path="state.db",
+    state_path="state.bin",
     recovery_callback=my_recover,   # (node_id, offset) -> bytes
 )
 
@@ -300,7 +396,7 @@ Array B: render-dedicated storage. Receives post-commit, post-quorum block forwa
 from render_store import RenderStore
 
 render = RenderStore(
-    db_path="world_render.db",
+    img_path="world_render.img",
     primary_fallback=primary.read_block,
 )
 primary.register_mirror(render.enqueue_forward_sync)
@@ -345,7 +441,7 @@ Parallel entity state image. Entity state is intentionally separated from the wo
 ```python
 from entity_sidecar import EntitySidecar, EntityRecord, EntityType, EntityFlags
 
-sidecar = EntitySidecar("entities.db")
+sidecar = EntitySidecar("entities.img")
 rec = EntityRecord(
     entity_id=1, entity_type=EntityType.PLAYER,
     flags=EntityFlags.ACTIVE | EntityFlags.VISIBLE,
@@ -390,7 +486,7 @@ Terrain layers (bottom to top):
 Terrain uses a deterministic SHA-256-based noise function — no external dependencies. The same seed always produces the same world, which makes crash-recovery validation straightforward: regenerate and diff.
 
 ```
-python world_gen.py --size 64 --seed 42 --out world.db --array-b world_render.db
+python world_gen.py --size 64 --seed 42 --out world.img --array-b world_render.img
 ```
 
 ### run_server.py
@@ -403,8 +499,8 @@ Server loop: wires mutation engine, render feed, entity sidecar, and health moni
 - Health report prints every 2 seconds showing Array A/B `write_seq` lag.
 
 ```
-python run_server.py --array-a world.db --array-b world_render.db \
-                     --sidecar entities.db --size 64 --duration 30
+python run_server.py --array-a world.img --array-b world_render.img \
+                     --sidecar entities.img --size 64 --duration 30
 ```
 
 ---
@@ -467,17 +563,21 @@ Entity state lives in a parallel sidecar image, never in the block image. Each s
 
 ---
 
-## Database Files
+## Flat Image Files
+
+The engine operates on binary flat image files. There is no database layer. Each file is a direct-addressed binary store — a coordinate becomes a byte offset via arithmetic, and the read or write lands at that offset on the physical device. The `.db` extension is a legacy convention from early prototyping; these files are not SQLite databases and require no SQL engine to operate.
 
 | File | Purpose |
 |------|---------|
-| world.db | Array A local block store (SparseBlockStore) |
-| world_render.db | Array B render block store (RenderStore) |
-| repl_log.db | Persistent replication entry log (ReplicationManager) |
-| state.db | Block state index + write-ahead journal (ResilientStore) |
-| entities.db | Entity sidecar (EntitySidecar) |
+| world.img | Array A local block store (SparseBlockStore) |
+| world_render.img | Array B render block store (RenderStore) |
+| repl_log.bin | Persistent replication entry log (ReplicationManager) |
+| state.bin | Block state index + write-ahead journal (ResilientStore) |
+| entities.img | Entity sidecar (EntitySidecar) |
 
-All use SQLite in WAL mode. Files may be co-located or placed on separate physical volumes. The intended production configuration is `world.db` and `world_render.db` on separate NVMe devices to fully realize the dual-array I/O isolation.
+Files may be co-located or placed on separate physical volumes. The intended production configuration is `world.img` and `world_render.img` on separate NVMe devices — ideally directly connected to the datacenter rack — to fully realize the dual-array I/O isolation. No network storage, no filesystem overhead, no SQL parse layer: the storage array **is** the world.
+
+> **External tool note:** SQL databases, ORMs, and query layers are not part of this engine and are not required for any core function. If a downstream system — analytics, observability, an asset pipeline — requires SQL access to block data, a read-only SQL adapter can be wired in externally without touching the engine's write path. The engine stays agnostic; the adapter bridges the gap. See `sql_store_adapter.py` for a reference implementation of this pattern.
 
 ---
 
@@ -489,12 +589,12 @@ All use SQLite in WAL mode. Files may be co-located or placed on separate physic
 pip install -r requirements.txt
 ```
 
-Standard library only for the storage layer — `sqlite3`, `zlib`, `hashlib`, `struct`, `threading`. No third-party packages required.
+Standard library only for the storage layer — `zlib`, `hashlib`, `struct`, `threading`. No third-party packages required. No SQL engine. No ORM. Direct binary I/O only.
 
 **2. Generate a world:**
 
 ```
-python world_gen.py --size 64 --seed 42 --out world.db --array-b world_render.db
+python world_gen.py --size 64 --seed 42 --out world.img --array-b world_render.img
 ```
 
 Writes a 64×64×64 block world through the full mutation engine stack. Both Array A and Array B are populated. Size is snapped to the nearest 16-block chunk boundary.
@@ -502,7 +602,7 @@ Writes a 64×64×64 block world through the full mutation engine stack. Both Arr
 **3. Run the server:**
 
 ```
-python run_server.py --array-a world.db --array-b world_render.db --sidecar entities.db --size 64
+python run_server.py --array-a world.img --array-b world_render.img --sidecar entities.img --size 64
 ```
 
 Runs at 20 Hz. Health report every 2 seconds. Ctrl-C for clean shutdown.
@@ -529,11 +629,20 @@ python replication_manager.py
 python resilient_store.py
 ```
 
+**7. Run an industry adapter (optional):**
+
+```
+python military_adapter.py --dry-run --origin-lat 38.8977 --origin-lon -77.0365
+python autonomous_adapter.py --dry-run --framework ros2
+```
+
+Adapters are self-contained. They require a running engine instance (`run_server.py`) but do not affect the engine's core operation if disconnected.
+
 ---
 
 ## Design Notes
 
-- The storage layer has no network I/O. Wire in your transport by supplying `sync_callback` and `recovery_callback` to ReplicationManager and ResilientStore.
+- The storage layer has no network I/O and no SQL dependency. Wire in your transport by supplying `sync_callback` and `recovery_callback` to ReplicationManager and ResilientStore. Wire in external tools via the adapter pattern described in the Industry Adapters section.
 - `verify_integrity()` is a generator — drive it from a background thread or a low-priority maintenance loop. It will not stall reads or writes under any load condition.
 - `max_blocks` should match the total block count of your flat world image so the engine enforces the same address space geometry as the underlying storage array.
 - The async mirror forward in ResilientStore fires outside the write lock. Array B never adds latency to mutation throughput regardless of mirror count.
@@ -557,107 +666,3 @@ python resilient_store.py
 ---
 
 *This is a research prototype. The architecture is complete and the storage layer is production-quality. The game client, terrain generator, and simulation modules are proof-of-concept scaffolding to demonstrate the primitive. See module docstrings for detailed design notes and assumptions.*
-
----
-
-## Appended: Spatial Movement and Studio Mutation Extension
-
-The mutation engine remains an **in-world studio plug-in surface**. It is not a generic database mutation layer and does not compromise the direct frame/block-storage model. It accepts typed world mutations and routes them to the engine primitives that preserve direct addressing, journal order, sidecar isolation, and replication publication.
-
-### Added modules
-
-- `kernel/spatial_index.py` — direct entity-to-block membership map. It is an in-memory acceleration structure, not a source of truth or query/database layer.
-- `kernel/movement_transaction.py` — journaled authoritative relocation. A movement commit updates the entity sidecar and spatial membership as one engine transition.
-- `environment/movement_resolver.py` — pure policy seam for physics, collision, studio rules, or domain-specific movement interpretation.
-- `replication/movement_replication.py` — transport-agnostic committed movement publication for region coordinators, mirrors, or render consumers.
-- `services/mutation_engine.py` — studio-facing typed mutation gateway. It routes movement but does not own storage, coordinate arithmetic, or transport.
-
-### Movement invariant
-
-Movement is evaluated as a direct coordinate-to-offset transition:
-
-```text
-intent → resolver → MovementTransaction → sidecar write + spatial membership → journal commit → replication publication
-```
-
-The world block image remains geometry/state at its physical offsets. High-frequency entity motion remains in the sidecar. The spatial index only accelerates membership and can be rebuilt from sidecar records after restart. Adapters may submit `MoveIntent` objects, but they do not write transforms directly.
-
-### Studio plug-in boundary
-
-A studio can replace or extend `MovementResolver` to implement character controllers, vehicle dynamics, autonomous agents, scientific particles, tactical units, or cinematic constraints. The resulting intent is still committed through the same authoritative transaction path.
-
-
----
-
-# Frame-Pure Deployment Model
-
-## Core premise
-
-The Block Storage Spatial Engine is the frame-level spatial primitive. It is not a database, filesystem, cache, network service, SAN product, or game engine stack. Its core operation is direct spatial addressing:
-
-```text
-coordinate → block address → frame operation
-```
-
-External tooling may exist around the frame—studio authoring tools, renderers, replication appliances, asset systems, transport adapters, analytics, and industry-specific integrations—but those are not layers inside the engine. They are replaceable consumers or producers of frame operations.
-
-No hardware, SAN frame, filesystem, SQL store, cache, network fabric, or production backend is attached to this repository at present. The repository defines the engine model and integration boundaries; it is not a measurement of a deployed system.
-
-## Direct-frame latency target
-
-The intended direct-frame response target is **100 µs** for a frame operation. This is a design target for a directly attached deployment, not a measured result from this repository. It must be reported as a target until a named frame, controller, media configuration, command size, queue depth, read/write mix, and percentile-latency test demonstrate it.
-
-At 100 µs per serialized operation, the theoretical ceiling is:
-
-| Operation model | Theoretical rate |
-|---|---:|
-| One serialized operation | 10,000 ops/s |
-| 16 independent queues | 160,000 ops/s |
-| 64 independent queues | 640,000 ops/s |
-
-These are latency-derived ceilings only. They are not device IOPS claims. Actual throughput is constrained by frame parallelism, command batching, block size, media bandwidth, consistency requirements, and workload locality.
-
-## 3 PB spatial-frame capacity
-
-Using the engine's 16-byte logical block and 0.66 m × 0.66 m horizontal resolution:
-
-| Measure | 3 PB decimal |
-|---|---:|
-| Raw logical bytes | 3,000,000,000,000,000 B |
-| Addressable 16-byte blocks | 187,500,000,000,000 |
-| One-layer surface coverage | ~81.7 million km² |
-| Equivalent square side length | ~9,040 km |
-| Footprint with 256 vertical layers | ~319,000 km² |
-
-This is the capacity of a compact spatial state field, not a claim that it stores all equivalent AAA art, audio, source assets, builds, or production history. Its efficiency is strongest where the required information per cell is compact and spatially regular: occupancy, terrain class, heat, hazard state, flood depth, navigation cost, visibility, and simulation fields.
-
-## Comparison to a hypothetical 3 PB AAA environment
-
-A conventional AAA studio's 3 PB is typically heterogeneous production storage: source assets, textures, meshes, audio, animation, build products, versions, backups, and caches. The frame uses the same raw byte budget for a uniform, directly addressable spatial state field.
-
-| Question | Conventional heterogeneous estate | Frame-pure spatial engine |
-|---|---|---|
-| Primary unit | files/assets/records | fixed spatial block |
-| Spatial lookup | application/index/asset path dependent | deterministic coordinate-to-block address |
-| Best use | content production and heterogeneous data | dense spatial state |
-| What 3 PB means | many kinds of production data | 187.5 trillion compact spatial cells |
-| Equivalent content claim | not applicable | not applicable |
-
-The advantage is not that 3 PB of spatial cells replaces 3 PB of studio production assets. The advantage is that a workload needing a huge regular spatial state field can represent that field without embedding it in a general-purpose content estate.
-
-## I/O demographics to validate on a frame
-
-The following are deployment measurements to publish once a frame exists:
-
-| Metric | Required reporting |
-|---|---|
-| Latency | p50, p95, p99, p99.9 by operation type |
-| IOPS | read, write, mixed; command size and queue count |
-| Throughput | bytes/s for contiguous ranges and spatial neighborhoods |
-| Locality | same-block, adjacent-block, radius scan, long traversal |
-| Concurrency | independent queues and contention behavior |
-| Durability | acknowledgement point and failure behavior |
-| Capacity | raw, usable, mirrored, parity, snapshot, and reserve space |
-| Energy/rack | measured watts, cooling, ports, and physical footprint |
-
-Until those measurements exist, the only numerical statements in this README are logical-capacity calculations and the 100 µs design target—not measured performance or datacenter reduction.

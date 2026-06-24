@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package starlink;
+
+service StarlinkService {
+  rpc GetStatus(Empty) returns (StatusResponse);
+  rpc SendDelta(DeltaRequest) returns (DeltaResponse);
+  rpc ReceiveDeltas(stream DeltaRequest) returns (stream DeltaResponse);
+}
+
+message Empty {}
+
+message StatusResponse {
+  bool connected = 1;
+  int32 latency_ms = 2;
+  int32 active_satellites = 3;
+  string beam_id = 4;
+}
+
+message DeltaRequest {
+  bytes payload = 1;
+  uint64 sequence = 2;
+  uint64 offset = 3;
+  string type = 4;  // "block" or "entity" or "render"
+}
+
+message DeltaResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. starlink_grpc.proto

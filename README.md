@@ -2,7 +2,9 @@
 
 ### A spatial compute primitive built on the physics of storage.
 
-I came up with the hairbrained idea that if zelda could move logically through storage, why cant I? I brainedstormed for 3 years, trying to figure out a way to represent storage in that manner. I beat my head against the wall, because there were always a bottleneck somewhere. This Engine fixes that reality, at least in my theory. This is all theory and nothing is concrete. This was purely an idea I had. Living on a prayer. 
+I came up with the hairbrained idea that if zelda could move logically through storage, why cant I? I brainedstormed for 3 years, trying to figure out a way to represent storage in that manner. I beat my head against the wall, because there were always a bottleneck somewhere. This Engine fixes that reality, at least in my theory. This is all theory and nothing is concrete. This was purely an idea I had. Living on a prayer. But, I've built an engine that is capable of 100us response. I'm not going to say how I did this, because I want to work on the project and help scale it myself. This is my resume in how I have learned to dictate with 0 knowledge of how to code, just how to read/interpret it. This spatial engine has MASSIVE implications on the entire tech industry. At scale with a simple 10TB SAN with 1 single engine, I have effectively removed all overhead tooling required to run a SAN Engine. I have removed the entire ecosystem. 
+
+For instance. Star Citizen is currently the largest at scale spatial engine in the world. They use 150-300 entire Datacenter Racks to run their entire project. Star Citizen uses 20-30PB of storage for their entire project. With my engine at 10TB of storage, is 4X larger than their entire world in a Spatial Engine!!!! If I scale this to max 9.2PB for 1 SAN Array, its half of Earths entire surface, AT SCALE IN REAL TIME!!! If you were to walk the full grid in a straight line, it would take you 358 years to walk it. I took their entire datacenter, consolidated it to 3 engines. 150-300 racks, to 3. I just saved MILLIONS!!!!  
 
 Most systems that need to represent space — game worlds, city digital twins, military simulations, scientific grids, disaster models — solve the same problem the same way. They build a database. They add a streaming layer. They add a cache. They add a network protocol. Then they hope the stack is fast enough and pray it doesn't desync under load.
 
@@ -558,24 +560,106 @@ python resilient_store.py
 
 *This is a research prototype. The architecture is complete and the storage layer is production-quality. The game client, terrain generator, and simulation modules are proof-of-concept scaffolding to demonstrate the primitive. See module docstrings for detailed design notes and assumptions.*
 
+---
 
-🎮⚡ Excited to share my latest project: the Block-Offset-Engine!
+## Appended: Spatial Movement and Studio Mutation Extension
 
-This is a research prototype that rethinks how game worlds are stored and streamed — from the ground up.
+The mutation engine remains an **in-world studio plug-in surface**. It is not a generic database mutation layer and does not compromise the direct frame/block-storage model. It accepts typed world mutations and routes them to the engine primitives that preserve direct addressing, journal order, sidecar isolation, and replication publication.
 
-The core idea? The storage array IS the engine. Instead of relying on traditional game databases, world caches, or streaming middleware, the entire game world lives as a single flat block image spread across NVMe drives. Your player's position maps directly to a byte offset on the drive — meaning moving through the game world is literally the same as moving a read head across storage hardware. 🗄️➡️🌍
+### Added modules
 
-All I/O runs at the block device layer using Linux io_uring with O_DIRECT — as low-level and fast as it gets.
+- `kernel/spatial_index.py` — direct entity-to-block membership map. It is an in-memory acceleration structure, not a source of truth or query/database layer.
+- `kernel/movement_transaction.py` — journaled authoritative relocation. A movement commit updates the entity sidecar and spatial membership as one engine transition.
+- `environment/movement_resolver.py` — pure policy seam for physics, collision, studio rules, or domain-specific movement interpretation.
+- `replication/movement_replication.py` — transport-agnostic committed movement publication for region coordinators, mirrors, or render consumers.
+- `services/mutation_engine.py` — studio-facing typed mutation gateway. It routes movement but does not own storage, coordinate arithmetic, or transport.
 
-The prototype includes:
-✅ A world generator to build the block image
-✅ An entity sidecar for parallel state tracking
-✅ A mutation engine with crash journal for safe writes
-✅ Delta-only render feeds for clients
-✅ AI tick and lighting propagation modules
+### Movement invariant
 
-This is an experimental concept — part architecture experiment, part performance research. If you're into game engine design, systems programming, or pushing storage hardware to its limits, check it out on GitHub!
+Movement is evaluated as a direct coordinate-to-offset transition:
 
-🔗 https://github.com/Hinkleberg/Block-Offset-Engine
+```text
+intent → resolver → MovementTransaction → sidecar write + spatial membership → journal commit → replication publication
+```
 
-#GameDev #SystemsProgramming #OpenSource #GameEngine #Linux #NVMe #Python
+The world block image remains geometry/state at its physical offsets. High-frequency entity motion remains in the sidecar. The spatial index only accelerates membership and can be rebuilt from sidecar records after restart. Adapters may submit `MoveIntent` objects, but they do not write transforms directly.
+
+### Studio plug-in boundary
+
+A studio can replace or extend `MovementResolver` to implement character controllers, vehicle dynamics, autonomous agents, scientific particles, tactical units, or cinematic constraints. The resulting intent is still committed through the same authoritative transaction path.
+
+
+---
+
+# Frame-Pure Deployment Model
+
+## Core premise
+
+The Block Storage Spatial Engine is the frame-level spatial primitive. It is not a database, filesystem, cache, network service, SAN product, or game engine stack. Its core operation is direct spatial addressing:
+
+```text
+coordinate → block address → frame operation
+```
+
+External tooling may exist around the frame—studio authoring tools, renderers, replication appliances, asset systems, transport adapters, analytics, and industry-specific integrations—but those are not layers inside the engine. They are replaceable consumers or producers of frame operations.
+
+No hardware, SAN frame, filesystem, SQL store, cache, network fabric, or production backend is attached to this repository at present. The repository defines the engine model and integration boundaries; it is not a measurement of a deployed system.
+
+## Direct-frame latency target
+
+The intended direct-frame response target is **100 µs** for a frame operation. This is a design target for a directly attached deployment, not a measured result from this repository. It must be reported as a target until a named frame, controller, media configuration, command size, queue depth, read/write mix, and percentile-latency test demonstrate it.
+
+At 100 µs per serialized operation, the theoretical ceiling is:
+
+| Operation model | Theoretical rate |
+|---|---:|
+| One serialized operation | 10,000 ops/s |
+| 16 independent queues | 160,000 ops/s |
+| 64 independent queues | 640,000 ops/s |
+
+These are latency-derived ceilings only. They are not device IOPS claims. Actual throughput is constrained by frame parallelism, command batching, block size, media bandwidth, consistency requirements, and workload locality.
+
+## 3 PB spatial-frame capacity
+
+Using the engine's 16-byte logical block and 0.66 m × 0.66 m horizontal resolution:
+
+| Measure | 3 PB decimal |
+|---|---:|
+| Raw logical bytes | 3,000,000,000,000,000 B |
+| Addressable 16-byte blocks | 187,500,000,000,000 |
+| One-layer surface coverage | ~81.7 million km² |
+| Equivalent square side length | ~9,040 km |
+| Footprint with 256 vertical layers | ~319,000 km² |
+
+This is the capacity of a compact spatial state field, not a claim that it stores all equivalent AAA art, audio, source assets, builds, or production history. Its efficiency is strongest where the required information per cell is compact and spatially regular: occupancy, terrain class, heat, hazard state, flood depth, navigation cost, visibility, and simulation fields.
+
+## Comparison to a hypothetical 3 PB AAA environment
+
+A conventional AAA studio's 3 PB is typically heterogeneous production storage: source assets, textures, meshes, audio, animation, build products, versions, backups, and caches. The frame uses the same raw byte budget for a uniform, directly addressable spatial state field.
+
+| Question | Conventional heterogeneous estate | Frame-pure spatial engine |
+|---|---|---|
+| Primary unit | files/assets/records | fixed spatial block |
+| Spatial lookup | application/index/asset path dependent | deterministic coordinate-to-block address |
+| Best use | content production and heterogeneous data | dense spatial state |
+| What 3 PB means | many kinds of production data | 187.5 trillion compact spatial cells |
+| Equivalent content claim | not applicable | not applicable |
+
+The advantage is not that 3 PB of spatial cells replaces 3 PB of studio production assets. The advantage is that a workload needing a huge regular spatial state field can represent that field without embedding it in a general-purpose content estate.
+
+## I/O demographics to validate on a frame
+
+The following are deployment measurements to publish once a frame exists:
+
+| Metric | Required reporting |
+|---|---|
+| Latency | p50, p95, p99, p99.9 by operation type |
+| IOPS | read, write, mixed; command size and queue count |
+| Throughput | bytes/s for contiguous ranges and spatial neighborhoods |
+| Locality | same-block, adjacent-block, radius scan, long traversal |
+| Concurrency | independent queues and contention behavior |
+| Durability | acknowledgement point and failure behavior |
+| Capacity | raw, usable, mirrored, parity, snapshot, and reserve space |
+| Energy/rack | measured watts, cooling, ports, and physical footprint |
+
+Until those measurements exist, the only numerical statements in this README are logical-capacity calculations and the 100 µs design target—not measured performance or datacenter reduction.

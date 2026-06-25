@@ -24,7 +24,7 @@ from flat_store import FlatStore
 from render_store import RenderStore
 from resilient_store import ResilientStore
 from entity_sidecar import EntitySidecar, EntityRecord, EntityType, EntityFlags
-from render_feed import RenderFeed, RenderDelta
+from render_feed import RenderFeedServer
 from mirror_health_monitor import MirrorHealthMonitor, MirrorStatus
 
 

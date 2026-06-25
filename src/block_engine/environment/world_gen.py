@@ -143,14 +143,14 @@ def main() -> None:
     print(f"Generating {layout}")
 
     store_a = FlatStore(args.out, layout)
-    store_b = RenderStore(args.array_b, layout, primary_fallback=store_a.read_block)
+    store_b = RenderStore(args.array_b, primary_fallback=store_a.read_block)
     rs      = ResilientStore(store_a, journal_path=args.journal)
     rs.register_mirror(store_b.enqueue_forward_sync)
 
     generate(layout, rs, seed=args.seed)
 
-    store_b.flush()
-    store_b.stop()
+    store_b.close()
+    store_b.close()
 
     print(f"Done. Array A write_seq={rs.write_seq}, Array B mirror_seq={store_b.mirror_write_seq}")
     print(rs.health_report())

@@ -50,7 +50,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "core"))
 
 from block_layout import Block, WorldLayout, BLOCK_SIZE
-from render_feed import RenderDelta
+from render_delta import RenderDelta, BlockDelta, EntityDelta
 
 
 # ---------------------------------------------------------------------------

@@ -1,10 +1,11 @@
 # Block-Image Engine
 
 ### A spatial compute primitive built on the physics of storage.
+                THE WORLDS FIRST BLOCK STORAGE LAYER SPATIAL ENGINE, EVER!!!
 
 I came up with the hairbrained idea that if zelda could move logically through storage, why cant I? I brainedstormed for 3 years, trying to figure out a way to represent storage in that manner. I beat my head against the wall, because there were always a bottleneck somewhere. This Engine fixes that reality, at least in my theory. This is all theory and nothing is concrete. This was purely an idea I had. Living on a prayer. But, I've built an engine that is capable of 100us response. I'm not going to say how I did this, because I want to work on the project and help scale it myself. This is my resume in how I have learned to dictate with 0 knowledge of how to code, just how to read/interpret it. This spatial engine has MASSIVE implications on the entire tech industry. At scale with a simple 10TB SAN with 1 single engine, I have effectively removed all overhead tooling required to run a SAN Engine, with custom architecture. I have removed the entire ecosystem. 
 
-Most systems that need to represent space — game worlds, city digital twins, military simulations, scientific grids, disaster models — solve the same problem the same way. They build a database. They add a streaming layer. They add a cache. They add a network protocol. Then they hope the stack is fast enough and pray it doesn't desync under load.
+Most systems that need to represent space — game worlds, city digital twins, military simulations, scientific grids, disaster models — solve the same problem the same way. They build a database. They add a streaming layer. They add a cache. They add a network protocol. Then they hope the stack is fast enough and pray it doesn't desync under load. Place the image of the world in space on the storage, spread it across the entire NVMe datastore as binary. Look at the data pipeline speeds!!!
 
 They treat storage as a place to retrieve *data about* space.
 

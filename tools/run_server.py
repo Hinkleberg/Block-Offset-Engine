@@ -5,6 +5,8 @@ Start everything for local testing:
 - Generates world if not present
 - Creates EntitySidecar, SpatialIndex, MovementTransaction, MutationEngine
 - Starts RenderFeedServer
+- Starts UnrealAdapter on port 7100 (UE5)
+- Starts UnityAdapter on port 7200 (Unity)
 - Starts ai_loop task
 """
 import asyncio
@@ -20,6 +22,9 @@ from kernel.movement_transaction import MovementTransaction
 from services.mutation_engine import MutationEngine
 from interface.render_feed import RenderFeedServer
 from environment.lighting_propagator import propagate_light
+from bridges.unreal_adapter import UnrealAdapter
+from bridges.unity_adapter import UnityAdapter
+from bridges.godot_adapter import GodotAdapter
 
 WORLD_PATH = "world.img"
 SIDECAR_PATH = "sidecar.img"
@@ -38,7 +43,15 @@ async def main():
     movement_transaction = MovementTransaction(layout, sidecar, spatial_index, journal=JOURNAL_PATH)
     mut = MutationEngine(movement_transaction)
     feed = RenderFeedServer()
-    await feed.start()
+    feed.start()
+
+    ue5 = UnrealAdapter(layout, host="127.0.0.1", port=7100)
+    ue5.start()
+
+    unity = UnityAdapter(layout, host="127.0.0.1", port=7200)
+    unity.start()
+    godot = GodotAdapter(layout, host="127.0.0.1", port=7300)
+    godot.start()
 
     def world_read(tile_idx: int):
         with open(WORLD_PATH, "rb") as f:
@@ -52,7 +65,6 @@ async def main():
         await asyncio.Event().wait()
     finally:
         ai_task.cancel()
-        sidecar.close()
 
 if __name__ == "__main__":
     asyncio.run(main())

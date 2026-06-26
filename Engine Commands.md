@@ -1,1 +1,3 @@
 ./Engine/Binaries/Linux/UnrealEditor --Opens Unread Editor
+cat ~/Block-Offset-Engine/src/block_engine/bridges/unity_adapter.py
+PYTHONPATH=src/block_engine:src/block_engine/authority:src/block_engine/bridges:src/block_engine/environment:src/block_engine/examples:src/block_engine/interface:src/block_engine/kernel:src/block_engine/replication:src/block_engine/services python tools/run_server.py --START SERVER

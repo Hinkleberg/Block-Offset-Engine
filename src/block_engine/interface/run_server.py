@@ -26,6 +26,9 @@ from resilient_store import ResilientStore
 from entity_sidecar import EntitySidecar, EntityRecord, EntityType, EntityFlags
 from render_feed import RenderFeedServer
 from mirror_health_monitor import MirrorHealthMonitor, MirrorStatus
+from tools.unreal.unreal_adapter import UnrealAdapter
+from tools.unity.unity_adapter import UnityAdapter
+from tools.godot.godot_adapter import GodotAdapter
 
 
 def main() -> None:
@@ -47,6 +50,14 @@ def main() -> None:
 
     sidecar = EntitySidecar(args.sidecar)
 
+    # Engine adapters — UE5 :7100 | Unity :7200 | Godot :7300
+    ue_adapter     = UnrealAdapter(layout, host="127.0.0.1", port=7100)
+    unity_adapter  = UnityAdapter(layout,  host="127.0.0.1", port=7200)
+    godot_adapter  = GodotAdapter(layout,  host="127.0.0.1", port=7300)
+    ue_adapter.start()
+    unity_adapter.start()
+    godot_adapter.start()
+
     # Synthetic player entity
     player = EntityRecord(
         entity_id=1, entity_type=EntityType.PLAYER,
@@ -65,6 +76,9 @@ def main() -> None:
         client_id=1, send_cb=on_delta,
         view_radius=16, initial_x=32.0, initial_y=64.0, initial_z=32.0,
     )
+    feed.connect_client(client_id=99, send_cb=ue_adapter.on_render_delta,    view_radius=64, initial_x=32.0, initial_y=64.0, initial_z=32.0)
+    feed.connect_client(client_id=50, send_cb=unity_adapter.on_render_delta,  view_radius=48, initial_x=32.0, initial_y=64.0, initial_z=32.0)
+    feed.connect_client(client_id=75, send_cb=godot_adapter.on_render_delta,  view_radius=48, initial_x=32.0, initial_y=64.0, initial_z=32.0)
     feed.start()
 
     # Mirror health monitor
@@ -129,6 +143,9 @@ def main() -> None:
     finally:
         feed.stop()
         monitor.stop()
+        ue_adapter.stop()
+        unity_adapter.stop()
+        godot_adapter.stop()
         store_b.flush()
         store_b.stop()
         print(f"Final: seq_A={rs.write_seq} seq_B={store_b.mirror_write_seq} "

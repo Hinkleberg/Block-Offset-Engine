@@ -23,7 +23,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "core"))
 
 from block_layout import WorldLayout, BLOCK_SIZE
-from render_feed import RenderDelta
+from render_delta import RenderDelta
 
 # Reuse same frame encoding as Unreal adapter
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "unreal"))

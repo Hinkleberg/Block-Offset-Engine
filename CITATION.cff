@@ -1,0 +1,8 @@
+cff-version: 1.2.0
+title: Block-Offset-Engine
+message: "If you use this software, please cite it as below."
+authors:
+  - family-names: Hinkleberg
+    given-names: Michael
+date-released: 2025-06-26
+url: "https://github.com/Hinkleberg/Block-Offset-Engine"

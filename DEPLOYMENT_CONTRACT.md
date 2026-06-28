@@ -7,6 +7,8 @@
 > PowerMax 2500 as specified in HARDWARE_AXIOMS.md. The front-end connectivity
 > specification is not part of this document.
 
+***THIS CAN BE DEPLOYED ANYWHERE, NOT JUST ON DELL HARDWARE. IF YOU HAVE NVMe environments, Block Storage is exactly the same as running a PC, except this has no FS other than the frontend.***
+
 ---
 
 ## 1. The Frame Operation
@@ -86,7 +88,7 @@ The two write paths are structurally isolated at the connection level.
 
 ### 2.1 Physical Requirements
 
-| Requirement | Specification |
+| Requirement | Specification | IF REPLICATING UNDER DELL ARCHITECTURE!
 |---|---|
 | Storage array | Dell PowerMax 2500 (see HARDWARE_AXIOMS.md) |
 | Array A volume | Dedicated NVMe LUN on PowerMax 2500, separate physical drives from Array B |
@@ -158,7 +160,7 @@ engine's SQLite connection degrades that target.
 
 ### 3.1 Latency-Derived Throughput Ceilings
 
-At the 100 µs design target (serialized, single operation):
+At the 100 µs design target (serialized, single operation): BASED ON HARDWARE!
 
 | Queue model | Theoretical ceiling | Basis |
 |---|---|---|
